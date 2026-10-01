@@ -37,6 +37,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # the tags and commits since the last release
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
 
       - name: Pick the next version
         id: version
@@ -64,12 +67,62 @@ jobs:
           echo "Last release: $last. Next: v$major.$minor.$patch"
           echo "tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
 
+      # Binaries for people without Go. Archive names leave out the version, so
+      # .../releases/latest/download/forge_darwin_arm64.tar.gz always works.
+      - name: Build binaries
+        if: steps.version.outputs.tag != ''
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          # Tagging the checkout first makes Go stamp the version that
+          # "forge --version" prints. The release step pushes the tag.
+          git tag "$TAG"
+          dist="$RUNNER_TEMP/dist"
+          mkdir -p "$dist"
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*} arch=${target#*/}
+            name="forge_${os}_${arch}"
+            out="$RUNNER_TEMP/build/$name"
+            bin=forge
+            if [ "$os" = windows ]; then bin=forge.exe; fi
+            GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w" -o "$out/$bin" ./cmd/forge
+            if [ "$os" = windows ]; then
+              (cd "$out" && zip -q "$dist/$name.zip" "$bin")
+            else
+              tar -czf "$dist/$name.tar.gz" -C "$out" "$bin"
+            fi
+          done
+          (cd "$dist" && sha256sum * > checksums.txt)
+          ls -l "$dist"
+
       - name: Tag and publish the release
         if: steps.version.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
-        # Creates the tag on this commit, with notes listing the changes since
-        # the previous release.
-        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+        # Creates the tag on this commit and attaches the binaries. The install
+        # steps go above the generated list of changes since the last release.
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          ## Install
+
+          **macOS or Linux:** download the archive for your system below, or for example on an Apple Silicon Mac:
+
+          \`\`\`sh
+          curl -L https://github.com/$GH_REPO/releases/download/$TAG/forge_darwin_arm64.tar.gz | tar xz
+          sudo mv forge /usr/local/bin/
+          \`\`\`
+
+          Use \`darwin_amd64\` for an Intel Mac and \`linux_amd64\` or \`linux_arm64\` for Linux.
+
+          **Windows:** download \`forge_windows_amd64.zip\` (or \`arm64\`), unzip it and put \`forge.exe\` on your PATH.
+
+          **With Go 1.27+:** \`go install github.com/$GH_REPO/cmd/forge@$TAG\`
+
+          Check with \`forge --version\`. \`checksums.txt\` has SHA-256 sums of the downloads.
+          EOF
+          gh release create "$TAG" "$RUNNER_TEMP"/dist/* --target "$GITHUB_SHA" --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
