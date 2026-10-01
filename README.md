@@ -58,7 +58,7 @@ This puts a `forge` binary in `$(go env GOPATH)/bin` (usually `~/go/bin`). Make 
 
 ```sh
 echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
-forge --help
+forge --version
 ```
 
 **Shell completion** covers commands, flags, allowed values and API names:
@@ -804,3 +804,16 @@ spec/ naming/ filter/ transform/ catalog/ request/ output/ transport/ auth/ styl
 ```
 
 Tests never touch your real keychain or config. They use temporary directories and the file credential store.
+
+### Releases
+
+Every push to `main`, including a merged pull request, runs the tests. If they pass, [a workflow](.github/workflows/release.yml) tags the next version and publishes a [GitHub release](https://github.com/jleva12/forge-cli/releases) listing the changes since the previous one.
+
+| In a commit message (or a squash-merged PR's title) | Next version after v0.1.0 |
+|---|---|
+| Nothing special | v0.1.1 |
+| `#minor` | v0.2.0 |
+| `#major` | v1.0.0 |
+| `[skip ci]` in the pushed commit | No release; the tests are skipped too |
+
+`go install github.com/jleva12/forge-cli/cmd/forge@latest` installs the newest release, and `forge --version` shows which one you have.

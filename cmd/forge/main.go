@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -67,10 +68,10 @@ func main() {
 }
 
 func buildRoot(ctx context.Context, args []string) (*cobra.Command, error) {
-	// Registry and completion commands never load a spec, so they work even
-	// when the active API's spec is missing or unreachable. Shells run
-	// "forge completion <shell>" at startup, so it must also be fast.
-	if first := firstArg(args); managementCommands[first] || first == "completion" {
+	// Registry and completion commands and --version never load a spec, so
+	// they work even when the active API's spec is missing or unreachable.
+	// Shells run "forge completion <shell>" at startup, so it must also be fast.
+	if first := firstArg(args); managementCommands[first] || first == "completion" || (len(args) == 1 && args[0] == "--version") {
 		return setupRoot(), nil
 	}
 	r, err := resolve(args)
@@ -87,6 +88,7 @@ func buildRoot(ctx context.Context, args []string) (*cobra.Command, error) {
 	}
 	opts := append(r.cfg.options(r.name),
 		forge.WithName("forge"),
+		forge.WithVersion(buildVersion()),
 		forge.WithDescription("", long),
 		forge.WithTransforms(avoidReservedNames),
 	)
@@ -152,6 +154,9 @@ func setupRoot() *cobra.Command {
 	root.PersistentFlags().String("spec", "", "OpenAPI spec file or URL for this command")
 	root.PersistentFlags().String("api", "", "registered API to use for this command")
 	root.RegisterFlagCompletionFunc("api", completeAPINames)
+	root.Version = buildVersion()
+	// Declared here so cobra doesn't give it -v, which API commands use for --verbose.
+	root.Flags().Bool("version", false, "version for forge")
 	forge.StyleRoot(root)
 	root.AddGroup(&cobra.Group{ID: groupRegistry, Title: "API Registry Commands:"})
 	root.AddCommand(registryCommands()...)
@@ -249,4 +254,14 @@ func firstArg(args []string) string {
 		}
 	}
 	return ""
+}
+
+// buildVersion is the version Go recorded in the binary: the module version
+// for "go install ...@v1.2.3", or one derived from the git tag and commit
+// for a build in a clone.
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
 }

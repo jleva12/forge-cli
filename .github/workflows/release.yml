@@ -1,0 +1,74 @@
+# Every push to main (including a merged pull request) runs the tests and, if
+# they pass, tags the next version and publishes a GitHub release for it.
+#
+# The next version bumps the patch number (v0.1.0 -> v0.1.1). Put "#minor" or
+# "#major" in a commit message (or a squash-merged PR's title) to bump those
+# instead. Put "[skip ci]" in the pushed commit's message to skip the release.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# One release at a time, so two quick merges can't claim the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the tags and commits since the last release
+
+      - name: Pick the next version
+        id: version
+        run: |
+          set -euo pipefail
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)
+          if [ -z "$last" ]; then
+            echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$(git rev-list "$last..HEAD")" ]; then
+            echo "No commits since $last, so there's nothing to release."
+            exit 0
+          fi
+          log=$(git log --format=%B "$last..HEAD")
+          IFS=. read -r major minor patch <<< "${last#v}"
+          patch=${patch%%[-+]*}
+          if grep -q '#major' <<< "$log"; then
+            major=$((major + 1)); minor=0; patch=0
+          elif grep -q '#minor' <<< "$log"; then
+            minor=$((minor + 1)); patch=0
+          else
+            patch=$((patch + 1))
+          fi
+          echo "Last release: $last. Next: v$major.$minor.$patch"
+          echo "tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
+
+      - name: Tag and publish the release
+        if: steps.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        # Creates the tag on this commit, with notes listing the changes since
+        # the previous release.
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
