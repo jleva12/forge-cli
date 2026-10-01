@@ -1,0 +1,212 @@
+openapi: 3.0.3
+info:
+  title: Petstore
+  version: 1.0.0
+  description: A sample API used to demonstrate forge.
+servers:
+  - url: https://petstore.example.com/{version}
+    variables:
+      version:
+        default: v1
+tags:
+  - name: pet
+    description: Everything about your pets. Add, find and update.
+  - name: store
+    description: Access to petstore orders.
+  - name: admin
+    description: Internal administration.
+security:
+  - apiKey: []
+  - bearerAuth: []
+paths:
+  /pets:
+    get:
+      tags: [pet]
+      operationId: listPets
+      summary: List pets
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of pets to return
+          schema: { type: integer, default: 20 }
+        - name: status
+          in: query
+          description: Filter by status
+          schema:
+            type: array
+            items: { type: string, enum: [available, pending, sold] }
+        - name: X-Request-ID
+          in: header
+          schema: { type: string }
+      responses:
+        "200":
+          description: A page of pets matching the filters
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Pet" }
+    post:
+      tags: [pet]
+      operationId: createPet
+      summary: Create a pet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewPet" }
+      responses:
+        "201": { description: created }
+  /pets/{petId}:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        description: ID of the pet
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [pet]
+      operationId: getPetById
+      summary: Get a pet by ID
+      responses:
+        "200":
+          description: The requested pet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pet" }
+        "404": { description: Pet not found }
+    delete:
+      tags: [pet]
+      operationId: deletePet
+      summary: Delete a pet
+      responses:
+        "204": { description: deleted }
+  /pets/{petId}/photo:
+    post:
+      tags: [pet]
+      operationId: uploadPetPhoto
+      summary: Upload a photo
+      x-cli-name: upload-photo
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+                caption: { type: string }
+      responses:
+        "200": { description: ok }
+  /pets/findByTags:
+    get:
+      tags: [pet]
+      operationId: findPetsByTags
+      summary: Find pets by tags
+      deprecated: true
+      parameters:
+        - name: tags
+          in: query
+          schema: { type: array, items: { type: string } }
+      responses:
+        "200": { description: ok }
+  /store/orders:
+    post:
+      tags: [store]
+      operationId: placeOrder
+      summary: Place an order
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [petId]
+              properties:
+                petId: { type: integer }
+                quantity: { type: integer }
+                shipping:
+                  type: object
+                  properties:
+                    address: { type: string }
+                    express: { type: boolean }
+      responses:
+        "200": { description: ok }
+  /store/inventory:
+    get:
+      tags: [store]
+      operationId: getInventory
+      summary: Returns pet inventories by status
+      x-cli-aliases: [inv]
+      responses:
+        "200": { description: ok }
+  /admin/reindex:
+    post:
+      tags: [admin]
+      operationId: reindex
+      summary: Rebuild the search index
+      responses:
+        "202": { description: accepted }
+  /internal/metrics:
+    get:
+      operationId: internalMetrics
+      summary: Internal metrics
+      x-cli-ignore: true
+      responses:
+        "200": { description: ok }
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      security: []
+      responses:
+        "200": { description: ok }
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Pet:
+      allOf:
+        - $ref: "#/components/schemas/NewPet"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: integer, description: Unique pet ID }
+            friends:
+              type: array
+              description: Other pets this pet gets along with
+              items: { $ref: "#/components/schemas/Pet" }
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: The pet's name
+        status:
+          type: string
+          enum: [available, pending, sold]
+        tags:
+          type: array
+          items: { type: string }
+        owner:
+          type: object
+          properties:
+            name: { type: string }
+            email: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Free-form metadata

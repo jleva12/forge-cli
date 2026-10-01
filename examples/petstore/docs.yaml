@@ -1,0 +1,20 @@
+# Documentation overrides layered on top of petstore.yaml. Keys are operation
+# IDs or "METHOD /path". These feed --help and the agent tool catalog
+# ("petstore tools"), so write them for someone who has never seen the API.
+listPets:
+  description: >-
+    Returns pets in the store, newest first. Use status to narrow the results
+    and limit to cap how many are returned (max 100).
+  params:
+    status: Only return pets in any of these states. Omit to return all states.
+getPetById:
+  description: Returns a single pet, including its owner and tags. Fails with 404 if the pet doesn't exist.
+createPet:
+  description: >-
+    Adds a pet to the store and returns it with its new id. Only name is
+    required; status defaults to "available".
+"POST /store/orders":
+  summary: Order a pet
+  description: Places an order for a pet. Returns the order, including its id and estimated ship date.
+  params:
+    shipping.express: Ship overnight for an extra fee.

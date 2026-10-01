@@ -1,0 +1,9 @@
+# IDE settings
+.idea/
+
+# macOS
+.DS_Store
+
+# Binaries built with go build in the repo root
+/forge
+/petstore
