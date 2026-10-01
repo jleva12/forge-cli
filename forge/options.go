@@ -53,6 +53,10 @@ func WithEnvPrefix(prefix string) Option { return func(a *App) { a.envPrefix = p
 // WithSpec loads the spec from a file path or http(s) URL.
 func WithSpec(location string) Option { return func(a *App) { a.specLocation = location } }
 
+// WithSpecCache keeps a spec loaded from a URL on disk between runs, so it
+// isn't downloaded every time the CLI starts. See spec.Cache.
+func WithSpecCache(c *spec.Cache) Option { return func(a *App) { a.loadOpts.Cache = c } }
+
 // WithSpecData uses spec bytes, typically from go:embed.
 func WithSpecData(data []byte) Option { return func(a *App) { a.specData = data } }
 
@@ -61,6 +65,12 @@ func WithAPI(api *spec.API) Option { return func(a *App) { a.api = api } }
 
 // WithValidation enables strict OpenAPI validation when loading.
 func WithValidation() Option { return func(a *App) { a.loadOpts.Validate = true } }
+
+// WithServerVariables fills in variables in the spec's server URLs, such as
+// {tenant} in https://{tenant}.example.com, instead of their defaults.
+func WithServerVariables(vars map[string]string) Option {
+	return func(a *App) { a.loadOpts.Normalize.ServerVariables = vars }
+}
 
 // WithBodyFlattenDepth sets how many levels of nested body objects become
 // dotted flags (default 2). Negative exposes top-level properties only.

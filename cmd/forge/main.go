@@ -19,6 +19,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -104,12 +105,28 @@ func buildRoot(ctx context.Context, args []string) (*cobra.Command, error) {
 	} else {
 		opts = append(opts, forge.WithUntrustedHostHint("Register the API with \"forge add <name> <spec> --trust-host <host>\" to allow it"))
 	}
+	cache, err := specCache()
+	if err != nil {
+		return nil, err
+	}
+	var stale []string
+	if cache != nil {
+		cache.Stale = func(location string, fetched time.Time, err error) {
+			stale = append(stale, staleWarning(location, fetched, err))
+		}
+		opts = append(opts, forge.WithSpecCache(cache))
+	}
 	stop := func() {}
 	if strings.HasPrefix(r.cfg.Spec, "http://") || strings.HasPrefix(r.cfg.Spec, "https://") {
 		stop = style.Spinner(os.Stderr, "Loading "+r.cfg.Spec)
 	}
 	root, err := forge.New(opts...).Command(ctx)
 	stop()
+	if !completing(args) { // the shell would show it in the middle of the prompt
+		for _, w := range stale {
+			fmt.Fprintln(os.Stderr, style.Stderr().Warning(w))
+		}
+	}
 	if err != nil {
 		hint := ""
 		switch r.source {

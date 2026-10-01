@@ -69,7 +69,7 @@ forge completion install
 
 This detects your shell (bash, zsh or fish) from `$SHELL` and sets up completion in its startup file: `~/.zshrc`, `~/.bash_profile` on macOS (`~/.bashrc` elsewhere), or `~/.config/fish/completions/forge.fish`. It's safe to re-run, since it removes any earlier setup first, including `source <(forge completion zsh)` lines added by hand. Pass a shell to pick one (`forge completion install zsh`); `forge completion uninstall` removes it again. Bash also needs the `bash-completion` package (`brew install bash-completion@2` on macOS).
 
-**Updating:** run the same `go install` command again (in a clone, pull first). **Uninstalling:** run `forge completion uninstall`, then `rm ~/go/bin/forge`. To also delete your settings, remove `~/.config/forge`, delete any `forge-cli` entries in Keychain Access, and remove the agent skill if you installed it (`rm -r ~/.claude/skills/forge`).
+**Updating:** run the same `go install` command again (in a clone, pull first). **Uninstalling:** run `forge completion uninstall`, then `rm ~/go/bin/forge`. To also delete your settings, remove `~/.config/forge` and the spec cache (`~/Library/Caches/forge` on macOS, `~/.cache/forge` on Linux), delete any `forge-cli` entries in Keychain Access, and remove the agent skill if you installed it (`rm -r ~/.claude/skills/forge`).
 
 ---
 
@@ -140,6 +140,8 @@ forge reads the spec each time it runs and builds the commands from it:
 
 Names are converted to kebab-case: `getPetById` becomes `get-pet-by-id`, and `X-Request-ID` becomes `--x-request-id`.
 
+A spec registered by URL isn't downloaded every time: forge keeps a copy and checks for a newer version once a day ([details](#keeping-specs-up-to-date)).
+
 ---
 
 ## Managing APIs (profiles)
@@ -164,8 +166,9 @@ The spec is loaded and checked before anything is saved. Relative file paths are
 | Flag | What it does |
 |---|---|
 | `--server <url>` | Base URL to call, overriding the spec's `servers` |
+| `--server-var <name>=<value>` | Fill in a variable in the spec's server URL, e.g. `tenant=acme` for `https://{tenant}.example.com` (repeatable; see [Multi-tenant APIs](#multi-tenant-apis)) |
 | `--use` | Make this the active API |
-| `--force` | Replace an existing API with the same name. Its login is deleted if the spec, server or trusted hosts change. |
+| `--force` | Replace an existing API with the same name. Its login is deleted if the spec, server, server variables or trusted hosts change. |
 | `--include-group <g>` / `--exclude-group <g>` | Only expose, or hide, a command group (repeatable) |
 | `--include-tag <t>` / `--exclude-tag <t>` | Only expose, or hide, operations with a tag (repeatable) |
 | `--include-path <glob>` / `--exclude-path <glob>` | Filter by path, e.g. `/v1/**` (repeatable) |
@@ -181,6 +184,20 @@ The spec is loaded and checked before anything is saved. Relative file paths are
 
 **Path globs:** `*` matches within one path segment, `**` matches across segments, and `/admin/**` also matches `/admin` itself.
 
+### Multi-tenant APIs
+
+Some specs put a variable in the server URL, such as `https://{tenant}.api.example.com/{version}`, so each customer gets their own host. Fill it in with `--server-var`, and register each tenant as its own API so each has its own login:
+
+```sh
+forge add acme   https://api.example.com/openapi.json --server-var tenant=acme
+forge add globex https://api.example.com/openapi.json --server-var tenant=globex --server-var version=v2
+forge --api globex users list-users      # calls https://globex.api.example.com/v2/users
+```
+
+Variables you don't set use the spec's defaults. A name that isn't in the server URL, or a value outside the spec's allowed list (`enum`), is rejected when you add the API. If a variable has no default and you don't set it, `forge add` warns you and commands stop with `needs a value for {tenant}` instead of calling a broken URL.
+
+`--server` works too, but it replaces the whole URL, so you'd repeat the parts the spec already has. Your login is sent to the filled-in host, because it comes from the spec and your saved settings.
+
 ### Switch, list and remove
 
 ```sh
@@ -189,6 +206,7 @@ forge use                # same picker
 forge use billing        # switch directly by name
 forge apis --list        # print the table instead (alias: -l)
 forge remove billing     # unregister it and delete its stored login (alias: rm)
+forge refresh            # download the latest specs (see below)
 ```
 
 On a terminal, `forge apis` and `forge use` open an interactive picker:
@@ -233,6 +251,26 @@ forge --spec ./draft-openapi.yaml routes                  # an unregistered spec
 
 forge picks the API in this order: `--spec`, then `--api`, then `$FORGE_SPEC`, then `$FORGE_API`, then the active API.
 
+### Keeping specs up to date
+
+forge keeps a copy of every spec it loads from a URL, including files the spec's `$ref`s point to, so commands and Tab completion don't wait for a download. Once a copy is a day old, forge asks the server whether the spec changed. That's a quick check when the server supports it (with an ETag or Last-Modified date), and the spec is downloaded again only if it changed.
+
+```sh
+forge refresh             # download the latest spec of every registered API now
+forge refresh stripe      # just one
+FORGE_SPEC_MAX_AGE=1h forge commands    # check after an hour instead of a day; 0 checks every time
+```
+
+`forge refresh` also updates the titles and versions shown by `forge apis`. `forge add` always downloads the spec.
+
+If the server can't be reached, or doesn't answer within 10 seconds, forge uses its copy and warns you:
+
+```
+! Couldn't check https://api.example.com/openapi.json for updates (no such host); using the copy downloaded 3 days ago.
+```
+
+Specs from files are read each time, so they're always current. A copy is saved only after the whole spec loads, so a broken download never replaces a working copy. The cache is in `~/Library/Caches/forge/specs` on macOS and `~/.cache/forge/specs` on Linux, and it's safe to delete.
+
 ### The registry file
 
 APIs are stored in `~/.config/forge/apis.toml` (run `forge apis --path` to see the exact path). You can edit it by hand:
@@ -249,6 +287,10 @@ active = "petstore"
   trusted_hosts = ["billing-staging.internal.example.com"]
   exclude_tags = ["admin"]
   read_only = true
+
+[apis.acme]
+  spec = "https://api.example.com/openapi.json"
+  server_vars = { tenant = "acme" }
 
 [apis.stripe]
   spec = "/Users/me/specs/stripe.json"
@@ -587,6 +629,8 @@ You can call the <API name> API with the `forge` CLI.
 | `FORGE_SPEC` | Unregistered spec file or URL to use for this shell |
 | `FORGE_CONFIG` | Path to the registry file (default `~/.config/forge/apis.toml`) |
 | `XDG_CONFIG_HOME` | Base config directory (default `~/.config`) |
+| `FORGE_SPEC_MAX_AGE` | How long a spec downloaded from a URL is used before forge checks for a newer one, e.g. `30m` or `24h` (default `24h`; `0` checks every time) |
+| `XDG_CACHE_HOME` | Base cache directory (default `~/Library/Caches` on macOS, `~/.cache` on Linux) |
 | `FORGE_CREDENTIAL_STORE` | `keychain` or `file`, to force where logins are stored |
 | `NO_COLOR` | Disable colors ([no-color.org](https://no-color.org)) |
 | `FORCE_COLOR` | Use colors even when output is piped |
@@ -600,6 +644,7 @@ You can call the <API name> API with the `forge` CLI.
 | `~/.config/forge/apis.toml` | Registered APIs and the active one. Safe to share. |
 | `~/.config/forge/credentials.json` | Logins, only when no OS keychain is available (mode 0600) |
 | OS keychain, service `forge-cli` | Logins, one entry per API (`api:<name>`) |
+| `~/Library/Caches/forge/specs` (macOS), `~/.cache/forge/specs` (Linux) | [Cached copies](#keeping-specs-up-to-date) of specs loaded from URLs. Safe to delete. |
 
 ### Registry file (`apis.toml`)
 
@@ -609,6 +654,7 @@ You can call the <API name> API with the `forge` CLI.
 | `[apis.<name>]` | table | One registered API |
 | `spec` | string | Spec file path or URL (required) |
 | `server` | string | Base URL override |
+| `server_vars` | table | Values for variables in the spec's server URL, e.g. `{ tenant = "acme" }` |
 | `trusted_hosts` | list | Extra hosts allowed to receive credentials |
 | `env_prefix` | string | Environment variable prefix |
 | `include_groups`, `exclude_groups` | list | Command group filters |
@@ -629,14 +675,17 @@ You can call the <API name> API with the `forge` CLI.
 | `unknown command "x"` | Command names come from the spec. Run `forge commands` or `forge <group> --help`. |
 | `missing required flag(s): --pet-id` | Add the flag. `forge commands --required-only` lists what each command needs. |
 | `invalid value "x" for status (one of: ...)` | Use one of the listed values (Tab completes them). |
+| `the spec's server URL ... needs a value for {tenant}` | The server URL has a variable with no default. Add the API again with `--server-var tenant=<value> --force`. |
 | `no API server URL ... relative` | The spec has no full server URL, which matters for specs loaded from a file or embedded (a spec loaded from a URL defaults to that URL's host). Set one with `forge add <name> <spec> --server https://... --force`. |
 | `401 Unauthorized` / `403 Forbidden` | Run `forge auth status`, then `forge auth login`. Check you're on the right profile with `forge use`. |
 | `refusing to send ... credentials to <host>` | The host isn't trusted for this API. If it's legitimate, add it to `trusted_hosts` and log in again. |
 | `the stored login is bound to <host>` | The profile's server changed since you logged in. Run `forge auth login`. |
 | `the filters hide every operation` | The spec probably has no tags. Use `--include-group` with a group listed in the warning. |
 | `would share environment variables` | Two API names map to the same env prefix. Pick another name or set `--env-prefix`. |
-| `loading <api> ...: unexpected status` / offline | A spec registered by URL is downloaded on every run. Download it once (`curl -o spec.json <url>`) and run `forge add <name> ./spec.json --force`. |
-| Slow startup on a huge spec | Same fix: use a local copy, and filter to the groups you need. |
+| `loading <api> ...: unexpected status` | The spec couldn't be downloaded and forge has no copy of it, for example right after `forge add` or a change to the spec URL. Check the URL in a browser. Once forge has a copy, it uses it when the server is down. |
+| `Couldn't check <url> for updates` | The spec's server can't be reached, so forge is using its [cached copy](#keeping-specs-up-to-date). Nothing to do unless the spec changed, in which case run `forge refresh` once the server is back. |
+| A new endpoint is missing | forge checks for a newer spec once a day. Run `forge refresh`. |
+| Slow startup on a huge spec | Filter to the groups you need with `--include-group`. |
 | `command not found: compdef`, or Tab doesn't complete | Run `forge completion install`, then open a new terminal. It replaces any older setup and turns on zsh's completion system if needed. |
 | Something else is wrong | Run with `--dry-run` to see the exact request, or `-v` to see the request and response. |
 
@@ -778,6 +827,8 @@ forge.WithFallbackAuth(auth.APIKey{Name: "X-Key", In: spec.InHeader, Value: auth
 forge.WithMiddleware(transport.UserAgent("myapi/1.0"), transport.Retry(3, 500*time.Millisecond))
 forge.WithRequestHook(func(ctx context.Context, op *spec.Operation, req *http.Request) error { ... })
 forge.WithResponseHook(func(ctx context.Context, op *spec.Operation, resp *output.Response) error { ... })
+forge.WithSpecCache(&spec.Cache{Dir: dir, MaxAge: 24 * time.Hour})    // keep a spec loaded with WithSpec(url) between runs
+forge.WithServerVariables(map[string]string{"tenant": "acme"})         // fill in https://{tenant}.example.com
 forge.WithFormatter("table", myTableFormatter)                         // -o table
 forge.WithCommands(myCustomCmd)                                        // hand-written commands
 ```
@@ -796,7 +847,7 @@ go run ./examples/petstore --help
 ```
 
 ```
-cmd/forge/          the forge binary: API registry, profiles, add/use/apis/remove
+cmd/forge/          the forge binary: API registry, profiles, add/use/apis/remove/refresh, spec cache location
 examples/petstore/  a dedicated CLI with an embedded spec, filters, transforms and docs overlay
 forge/              framework entry point: options, command building, built-in commands, shell completion
 skills/forge/       agent skill that teaches AI agents to use forge (SKILL.md plus references)

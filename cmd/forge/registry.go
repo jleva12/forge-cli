@@ -31,6 +31,10 @@ import (
 //	spec = "/Users/me/specs/billing.yaml"
 //	server = "https://billing.internal.example.com"
 //	read_only = true
+//
+//	[apis.acme]
+//	spec = "https://api.example.com/openapi.json" # servers: https://{tenant}.example.com
+//	server_vars = { tenant = "acme" }
 type Registry struct {
 	Active string                `toml:"active,omitempty"`
 	APIs   map[string]*APIConfig `toml:"apis"`
@@ -42,7 +46,10 @@ type APIConfig struct {
 	Title       string `toml:"title,omitempty"`
 	Description string `toml:"description,omitempty"`
 	Server      string `toml:"server,omitempty"`
-	EnvPrefix   string `toml:"env_prefix,omitempty"`
+	// ServerVars fill in variables in the spec's server URLs, e.g. the
+	// tenant in https://{tenant}.example.com.
+	ServerVars map[string]string `toml:"server_vars,omitempty"`
+	EnvPrefix  string            `toml:"env_prefix,omitempty"`
 	// TrustedHosts may receive credentials in addition to server and the
 	// spec's servers, e.g. a staging host used with --server.
 	TrustedHosts []string  `toml:"trusted_hosts,omitempty"`
@@ -74,6 +81,9 @@ func (c *APIConfig) options(name string) []forge.Option {
 	opts := []forge.Option{forge.WithSpec(c.Spec), forge.WithEnvPrefix(c.envPrefix(name))}
 	if c.Server != "" {
 		opts = append(opts, forge.WithBaseURL(c.Server))
+	}
+	if len(c.ServerVars) > 0 {
+		opts = append(opts, forge.WithServerVariables(c.ServerVars))
 	}
 	if len(c.TrustedHosts) > 0 {
 		opts = append(opts, forge.WithTrustedHosts(c.TrustedHosts...))
@@ -216,7 +226,12 @@ func (r *Registry) lookup(name string) (*APIConfig, error) {
 
 // endpoint is what a login is bound to; changing it invalidates the login.
 func (c *APIConfig) endpoint() string {
-	return c.Spec + "|" + c.Server + "|" + strings.Join(c.TrustedHosts, ",")
+	vars := make([]string, 0, len(c.ServerVars))
+	for name, value := range c.ServerVars {
+		vars = append(vars, name+"="+value)
+	}
+	sort.Strings(vars)
+	return c.Spec + "|" + c.Server + "|" + strings.Join(vars, ",") + "|" + strings.Join(c.TrustedHosts, ",")
 }
 
 // envPrefixConflict returns the name of another API using the same

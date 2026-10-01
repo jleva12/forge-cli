@@ -3,6 +3,7 @@ package spec
 import (
 	"context"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -71,6 +72,39 @@ func TestOpenAPI31FileFields(t *testing.T) {
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("%s: format = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestServerVariables(t *testing.T) {
+	doc := `{"openapi": "3.0.3", "info": {"title": "t", "version": "1"}, "paths": {}, "servers": [
+  {"url": "https://{tenant}.example.com/{version}", "variables": {"version": {"default": "v1", "enum": ["v1", "v2"]}}}]}`
+	load := func(vars map[string]string) (*API, error) {
+		return LoadData(context.Background(), []byte(doc), nil, LoadOptions{Normalize: NormalizeOptions{ServerVariables: vars}})
+	}
+
+	api, err := load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := api.Servers[0]; s.URL != "https://{tenant}.example.com/v1" || len(s.Missing) != 1 || s.Missing[0] != "tenant" {
+		t.Errorf("without values: %+v", s)
+	}
+
+	api, err = load(map[string]string{"tenant": "acme", "version": "v2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := api.Servers[0]; s.URL != "https://acme.example.com/v2" || len(s.Missing) != 0 {
+		t.Errorf("with values: %+v", s)
+	}
+
+	for wantErr, vars := range map[string]map[string]string{
+		`no such variable (they have: tenant, version)`: {"tenat": "acme"},
+		`must be one of v1, v2`:                         {"tenant": "acme", "version": "v9"},
+	} {
+		if _, err := load(vars); err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Errorf("load(%v) = %v, want an error containing %q", vars, err, wantErr)
 		}
 	}
 }

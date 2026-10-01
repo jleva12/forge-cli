@@ -21,12 +21,12 @@ import (
 
 // Registry management commands. They run without loading any spec, so they
 // keep working when the active API's spec is unreachable.
-var managementCommands = map[string]bool{"add": true, "use": true, "apis": true, "remove": true, "rm": true}
+var managementCommands = map[string]bool{"add": true, "use": true, "apis": true, "remove": true, "rm": true, "refresh": true}
 
 const groupRegistry = "registry"
 
 func registryCommands() []*cobra.Command {
-	cmds := []*cobra.Command{addCommand(), useCommand(), apisCommand(), removeCommand()}
+	cmds := []*cobra.Command{addCommand(), useCommand(), apisCommand(), removeCommand(), refreshCommand()}
 	for _, c := range cmds {
 		c.GroupID = groupRegistry
 	}
@@ -36,6 +36,7 @@ func registryCommands() []*cobra.Command {
 func addCommand() *cobra.Command {
 	var (
 		name, specLoc, file string
+		serverVars          []string
 		cfg                 APIConfig
 		use, force, noCheck bool
 	)
@@ -52,6 +53,7 @@ Register many APIs at once from a TOML file with --file; it uses the same
 format as the registry ("forge apis --toml" prints one to share).`,
 		Example: `  forge add petstore https://petstore3.swagger.io/api/v3/openapi.json
   forge add --name billing --spec ./billing.yaml --server https://billing.internal --read-only
+  forge add acme https://api.example.com/openapi.json --server-var tenant=acme
   forge add stripe ./stripe.json --include-tag customers --include-tag charges --use
   forge add --file team-apis.toml`,
 		Args: cobra.MaximumNArgs(2),
@@ -79,6 +81,9 @@ format as the registry ("forge apis --toml" prints one to share).`,
 				return errors.New(`need a name and a spec: forge add <name> <file|url>`)
 			}
 			if err := checkName(name); err != nil {
+				return err
+			}
+			if cfg.ServerVars, err = parseServerVars(serverVars); err != nil {
 				return err
 			}
 			old, exists := reg.APIs[name]
@@ -137,6 +142,7 @@ format as the registry ("forge apis --toml" prints one to share).`,
 	f.StringVar(&specLoc, "spec", "", "OpenAPI spec file or URL")
 	f.StringVar(&file, "file", "", "register every API in a TOML file")
 	f.StringVar(&cfg.Server, "server", "", "base URL, overriding the spec's servers")
+	f.StringArrayVar(&serverVars, "server-var", nil, "value for a variable in the spec's server URL, e.g. tenant=acme for https://{tenant}.example.com (repeatable)")
 	f.StringVar(&cfg.EnvPrefix, "env-prefix", "", "environment variable prefix for credentials (default: the name, upper-cased)")
 	f.StringArrayVar(&cfg.TrustedHosts, "trust-host", nil, "extra host allowed to receive credentials, e.g. staging.example.com (repeatable)")
 	f.StringArrayVar(&cfg.IncludeGroups, "include-group", nil, "only expose this command group, e.g. customers (repeatable)")
@@ -232,9 +238,19 @@ func addFromFile(ctx context.Context, cmd *cobra.Command, reg *Registry, file st
 }
 
 // inspect loads the spec with the API's settings and summarizes it. It also
-// fills in the title and description.
+// fills in the title and description. A spec registered by URL is always
+// downloaded, and the cached copy updated.
 func inspect(ctx context.Context, name string, cfg *APIConfig) (string, error) {
-	app := forge.New(append(cfg.options(name), forge.WithName("forge"))...)
+	opts := append(cfg.options(name), forge.WithName("forge"))
+	cache, err := specCache()
+	if err != nil {
+		return "", err
+	}
+	if cache != nil {
+		cache.Refresh = true
+		opts = append(opts, forge.WithSpecCache(cache))
+	}
+	app := forge.New(opts...)
 	if err := app.Load(ctx); err != nil {
 		return "", err
 	}
@@ -248,7 +264,41 @@ func inspect(ctx context.Context, name string, cfg *APIConfig) (string, error) {
 	if len(app.Operations()) == 0 && len(app.Excluded()) > 0 {
 		summary += "\nWarning: the filters hide every operation. Available groups: " + groupList(app.Excluded(), 20)
 	}
+	if cfg.Server == "" {
+		// The server commands will call: the first that's absolute or has a gap.
+		for _, s := range api.Servers {
+			if len(s.Missing) > 0 {
+				flags := make([]string, len(s.Missing))
+				for i, v := range s.Missing {
+					flags[i] = "--server-var " + v + "=<value>"
+				}
+				summary += fmt.Sprintf("\nWarning: the spec's server URL %s needs a value for {%s}. Add the API again with %s --force, or set a full URL with --server.",
+					s.URL, strings.Join(s.Missing, "}, {"), strings.Join(flags, " "))
+				break
+			}
+			if strings.HasPrefix(s.URL, "http://") || strings.HasPrefix(s.URL, "https://") {
+				break
+			}
+		}
+	}
 	return summary, nil
+}
+
+// parseServerVars turns --server-var name=value pairs into a map.
+func parseServerVars(pairs []string) (map[string]string, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	vars := map[string]string{}
+	for _, pair := range pairs {
+		name, value, ok := strings.Cut(pair, "=")
+		name = strings.TrimSuffix(strings.TrimPrefix(name, "{"), "}") // accept {tenant}=acme
+		if !ok || name == "" {
+			return nil, fmt.Errorf("--server-var %q: want name=value, e.g. tenant=acme", pair)
+		}
+		vars[name] = value
+	}
+	return vars, nil
 }
 
 // groupList summarizes the command groups of ops, e.g. for filter hints.
@@ -492,12 +542,68 @@ func removeCommand() *cobra.Command {
 	}
 }
 
-// printSummary prints an inspect summary, styling a trailing warning line.
+func refreshCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "refresh [name]...",
+		Short: "Download the latest specs",
+		Long: `Download the latest spec of each named API, or of every registered API, and
+update their titles in "forge apis".
+
+forge keeps a copy of each spec registered by URL, so it doesn't download the
+spec on every run. It checks the server for a newer version once the copy is a
+day old (set FORGE_SPEC_MAX_AGE to change that, e.g. 1h or 0). Refresh checks
+now.`,
+		Example: `  forge refresh            # every registered API
+  forge refresh petstore`,
+		ValidArgsFunction: completeAPINames,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reg, err := loadRegistry()
+			if err != nil {
+				return err
+			}
+			names := args
+			if len(names) == 0 {
+				if names = reg.names(); len(names) == 0 {
+					return errors.New(`no APIs are registered yet (add one with "forge add <name> <spec>")`)
+				}
+			}
+			for _, name := range names {
+				if _, err := reg.lookup(name); err != nil {
+					return err
+				}
+			}
+			out := cmd.OutOrStdout()
+			p := style.For(out)
+			failed := 0
+			for _, name := range names {
+				cfg := reg.APIs[name]
+				stop := style.Spinner(cmd.ErrOrStderr(), "Loading "+cfg.Spec)
+				summary, err := inspect(cmd.Context(), name, cfg)
+				stop()
+				if err != nil {
+					fmt.Fprintf(out, "  %s %s %s\n", p.Red("fail"), p.Bold(name), err)
+					failed++
+					continue
+				}
+				fmt.Fprintf(out, "  %s   %s %s\n", p.Green("ok"), p.Bold(name), p.Dim(strings.SplitN(summary, "\n", 2)[0]))
+			}
+			if _, err := reg.save(); err != nil {
+				return err
+			}
+			if failed > 0 {
+				return fmt.Errorf("%d API(s) could not be refreshed", failed)
+			}
+			return nil
+		},
+	}
+}
+
+// printSummary prints an inspect summary, styling its warning lines.
 func printSummary(out io.Writer, prefix, summary string) {
 	p := style.For(out)
-	main, warning, _ := strings.Cut(summary, "\nWarning: ")
-	fmt.Fprintln(out, p.Success(prefix+main))
-	if warning != "" {
+	parts := strings.Split(summary, "\nWarning: ")
+	fmt.Fprintln(out, p.Success(prefix+parts[0]))
+	for _, warning := range parts[1:] {
 		fmt.Fprintln(out, p.Warning(warning))
 	}
 }

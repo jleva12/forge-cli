@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -29,6 +30,8 @@ func runForge(t *testing.T, args ...string) (string, error) {
 func setup(t *testing.T) string {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("FORGE_SPEC_MAX_AGE", "")
 	t.Setenv("FORGE_SPEC", "")
 	t.Setenv("FORGE_API", "")
 	t.Setenv("FORGE_CONFIG", "")
@@ -345,6 +348,125 @@ func TestCompletionWithoutLoadableSpec(t *testing.T) {
 	} {
 		if got := firstArg(strings.Split(args, " ")); got != want {
 			t.Errorf("firstArg(%q) = %q, want %q", args, got, want)
+		}
+	}
+}
+
+func TestSpecCacheAndRefresh(t *testing.T) {
+	file := setup(t)
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	body, requests, down := string(data), 0, false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		requests++
+		if down {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	count := func() int { mu.Lock(); defer mu.Unlock(); return requests }
+
+	if out, err := runForge(t, "add", "pets", srv.URL+"/openapi.yaml"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	for range 2 {
+		if out, err := runForge(t, "commands"); err != nil {
+			t.Fatalf("commands: %v\n%s", err, out)
+		}
+	}
+	if n := count(); n != 1 {
+		t.Errorf("spec downloaded %d times, want once (by add)", n)
+	}
+
+	mu.Lock()
+	body = strings.Replace(body, "version: 1.0.0", "version: 2.0.0", 1)
+	mu.Unlock()
+	out, err := runForge(t, "refresh")
+	if err != nil || !strings.Contains(out, "pets") || count() != 2 {
+		t.Fatalf("refresh: %v (%d requests)\n%s", err, count(), out)
+	}
+	if reg, _ := loadRegistry(); reg.APIs["pets"].Title != "Petstore 2.0.0" {
+		t.Errorf("refresh should update the title, got %q", reg.APIs["pets"].Title)
+	}
+
+	// With the server down, commands use the cached copy but refresh fails.
+	mu.Lock()
+	down = true
+	mu.Unlock()
+	t.Setenv("FORGE_SPEC_MAX_AGE", "0")
+	if out, err := runForge(t, "commands"); err != nil {
+		t.Errorf("commands should fall back to the cached spec: %v\n%s", err, out)
+	}
+	if out, err := runForge(t, "refresh", "pets"); err == nil || !strings.Contains(out, "503") {
+		t.Errorf("refresh with the server down: %v\n%s", err, out)
+	}
+	if _, err := runForge(t, "refresh", "nope"); err == nil || !strings.Contains(err.Error(), `no API named "nope"`) {
+		t.Errorf("refresh of an unknown API: %v", err)
+	}
+
+	t.Setenv("FORGE_SPEC_MAX_AGE", "a day")
+	if _, err := runForge(t, "commands"); err == nil || !strings.Contains(err.Error(), "FORGE_SPEC_MAX_AGE") {
+		t.Errorf("an invalid FORGE_SPEC_MAX_AGE should be reported, got %v", err)
+	}
+}
+
+func TestServerVariables(t *testing.T) {
+	setup(t)
+	spec := filepath.Join(t.TempDir(), "tenant.yaml")
+	os.WriteFile(spec, []byte(`openapi: 3.0.3
+info: {title: Tenants, version: "1"}
+servers:
+  - url: https://{tenant}.api.example.com/{version}
+    variables:
+      version: {default: v1, enum: [v1, v2]}
+security: [{bearer: []}]
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      responses: {"200": {description: ok}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+`), 0o644)
+
+	if out, err := runForge(t, "add", "acme", spec, "--server-var", "tenant=acme"); err != nil || strings.Contains(out, "needs a value") {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	login(t, "acme-token")
+	out, err := runForge(t, "users", "list-users", "--dry-run")
+	if err != nil || !strings.Contains(out, "https://acme.api.example.com/v1/users") || !strings.Contains(out, "Authorization: REDACTED") {
+		t.Fatalf("the tenant's host should get the request and the login: %v\n%s", err, out)
+	}
+
+	// Another tenant is another endpoint, so the login doesn't carry over.
+	out, err = runForge(t, "add", "acme", spec, "--server-var", "tenant=globex", "--server-var", "version=v2", "--force")
+	if err != nil || !strings.Contains(out, "Deleted the stored login") {
+		t.Fatalf("switching tenants should delete the login: %v\n%s", err, out)
+	}
+	if out, _ := runForge(t, "users", "list-users", "--dry-run"); !strings.Contains(out, "https://globex.api.example.com/v2/users") {
+		t.Errorf("after switching tenants:\n%s", out)
+	}
+
+	out, err = runForge(t, "add", "unset", spec)
+	if err != nil || !strings.Contains(out, "--server-var tenant=<value> --force") {
+		t.Errorf("add without the variable should say how to set it: %v\n%s", err, out)
+	}
+	if _, err := runForge(t, "--api", "unset", "users", "list-users", "--dry-run"); err == nil || !strings.Contains(err.Error(), "needs a value for {tenant}") {
+		t.Errorf("running without the variable: %v", err)
+	}
+
+	for _, bad := range []string{"tenat=acme", "version=v9", "acme"} {
+		if _, err := runForge(t, "add", "bad", spec, "--server-var", bad); err == nil {
+			t.Errorf("--server-var %s should be rejected", bad)
 		}
 	}
 }

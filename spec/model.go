@@ -51,10 +51,13 @@ type API struct {
 	Doc *openapi3.T
 }
 
-// Server is an API server with its variables already substituted by their defaults.
+// Server is an API server with its variables already filled in, from
+// NormalizeOptions.ServerVariables or their defaults.
 type Server struct {
 	URL         string
 	Description string
+	// Missing lists variables that had no value and are still in URL as {name}.
+	Missing []string
 }
 
 // SecurityScheme describes one entry of components.securitySchemes.

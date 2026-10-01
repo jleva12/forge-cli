@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -16,6 +17,9 @@ type NormalizeOptions struct {
 	// dotted flags (e.g. --owner.name). 0 means the default of 2; a negative
 	// value exposes top-level properties only.
 	BodyFlattenDepth int
+	// ServerVariables fill in variables in the servers' URLs, such as
+	// {tenant} in https://{tenant}.example.com, instead of their defaults.
+	ServerVariables map[string]string
 }
 
 var methodOrder = []string{
@@ -41,9 +45,12 @@ func Normalize(doc *openapi3.T, opts NormalizeOptions) (*API, error) {
 	if doc.Info != nil {
 		api.Title, api.Version, api.Description = doc.Info.Title, doc.Info.Version, doc.Info.Description
 	}
+	if err := checkServerVariables(doc.Servers, opts.ServerVariables); err != nil {
+		return nil, err
+	}
 	for _, s := range doc.Servers {
 		if s != nil {
-			api.Servers = append(api.Servers, Server{URL: expandServer(s), Description: s.Description})
+			api.Servers = append(api.Servers, expandServer(s, opts.ServerVariables))
 		}
 	}
 	for _, t := range doc.Tags {
@@ -376,14 +383,66 @@ func preferredContentType(cts []string) string {
 	return ""
 }
 
-func expandServer(s *openapi3.Server) string {
-	u := s.URL
+var serverVariable = regexp.MustCompile(`\{([^{}]+)\}`)
+
+// expandServer fills in a server URL's variables from vars, else from their
+// defaults.
+func expandServer(s *openapi3.Server, vars map[string]string) Server {
+	out := Server{URL: s.URL, Description: s.Description}
+	for name, value := range vars {
+		out.URL = strings.ReplaceAll(out.URL, "{"+name+"}", value)
+	}
 	for name, v := range s.Variables {
 		if v != nil {
-			u = strings.ReplaceAll(u, "{"+name+"}", v.Default)
+			out.URL = strings.ReplaceAll(out.URL, "{"+name+"}", v.Default)
 		}
 	}
-	return u
+	for _, m := range serverVariable.FindAllStringSubmatch(out.URL, -1) {
+		out.Missing = append(out.Missing, m[1])
+	}
+	return out
+}
+
+// checkServerVariables rejects values for variables that no server URL has,
+// and values outside a variable's enum.
+func checkServerVariables(servers openapi3.Servers, vars map[string]string) error {
+	if len(vars) == 0 {
+		return nil
+	}
+	known := map[string]*openapi3.ServerVariable{}
+	for _, s := range servers {
+		if s == nil {
+			continue
+		}
+		for _, m := range serverVariable.FindAllStringSubmatch(s.URL, -1) {
+			if known[m[1]] == nil {
+				known[m[1]] = s.Variables[m[1]]
+			}
+		}
+	}
+	names := make([]string, 0, len(vars))
+	for name := range vars {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		v, ok := known[name]
+		if !ok {
+			if len(known) == 0 {
+				return fmt.Errorf("server variable %q: the spec's server URLs have no variables", name)
+			}
+			have := make([]string, 0, len(known))
+			for k := range known {
+				have = append(have, k)
+			}
+			sort.Strings(have)
+			return fmt.Errorf("server variable %q: the spec's server URLs have no such variable (they have: %s)", name, strings.Join(have, ", "))
+		}
+		if v != nil && len(v.Enum) > 0 && !slices.Contains(v.Enum, vars[name]) {
+			return fmt.Errorf("server variable %s=%q: must be one of %s", name, vars[name], strings.Join(v.Enum, ", "))
+		}
+	}
+	return nil
 }
 
 func convertSecurity(reqs openapi3.SecurityRequirements) []SecurityRequirement {

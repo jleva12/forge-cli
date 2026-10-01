@@ -18,8 +18,9 @@ forge add stripe ./stripe.json --include-group customers --include-group charges
 | Flag | What it does |
 |---|---|
 | `--server <url>` | Base URL to call, overriding the spec's `servers`. Needed when a spec loaded from a local file has no full server URL. Specs loaded from a URL default to that URL's host. |
+| `--server-var <name>=<value>` | Fill in a variable in the spec's server URL, e.g. `tenant=acme` for `https://{tenant}.example.com` (repeatable). For multi-tenant APIs, register one API per tenant. |
 | `--use` | Make this the active API |
-| `--force` | Replace an existing API with the same name. Its stored login is deleted if the spec, server or trusted hosts change. Ask the user first. |
+| `--force` | Replace an existing API with the same name. Its stored login is deleted if the spec, server, server variables or trusted hosts change. Ask the user first. |
 | `--include-group <g>` / `--exclude-group <g>` | Only expose, or hide, a command group (repeatable) |
 | `--include-tag <t>` / `--exclude-tag <t>` | Only expose, or hide, operations with a tag (repeatable) |
 | `--include-path <glob>` / `--exclude-path <glob>` | Filter by path, e.g. `/v1/**` (repeatable) |
@@ -44,7 +45,10 @@ forge apis                # list registered APIs (● = active)
 forge use                 # show the active API, its source and login state
 forge use <name>          # make <name> the active API (persistent; ask the user first)
 forge remove <name>...    # unregister and delete the stored login (alias: rm; ask the user first)
+forge refresh [<name>...] # download the latest specs (all APIs if no name)
 ```
+
+Specs registered by URL are cached and checked for changes once a day. If a command or group that should exist is missing, run `forge refresh` before concluding the API doesn't have it. A warning like `Couldn't check <url> for updates` means the spec's server is unreachable and forge used its cached copy; the command itself still ran.
 
 To run commands against an API without switching:
 
@@ -72,7 +76,7 @@ active = "petstore"
   read_only = true
 ```
 
-Keys: `spec`, `server`, `trusted_hosts`, `env_prefix`, `include_groups`, `exclude_groups`, `include_tags`, `exclude_tags`, `include_paths`, `exclude_paths`, `exclude_operations`, `exclude_deprecated`, `read_only`. Prefer `forge add ... --force` over editing the file by hand.
+Keys: `spec`, `server`, `server_vars`, `trusted_hosts`, `env_prefix`, `include_groups`, `exclude_groups`, `include_tags`, `exclude_tags`, `include_paths`, `exclude_paths`, `exclude_operations`, `exclude_deprecated`, `read_only`. Prefer `forge add ... --force` over editing the file by hand.
 
 ## Share with a team
 
@@ -89,6 +93,8 @@ Relative spec paths in the file are resolved against the file's own location.
 |---|---|
 | `No API is active yet` | `forge add <name> <spec>`, or `forge use <name>` if it's already registered |
 | `no API server URL ... relative` | Re-add with `--server https://... --force` |
+| `the spec's server URL ... needs a value for {tenant}` | Ask the user for the value, then re-add with `--server-var tenant=<value> --force` |
 | `the filters hide every operation` | Use `--include-group` with a group from the warning |
 | `would share environment variables` | Two names map to the same prefix. Pick another name or set `--env-prefix`. |
-| `loading <api> ...: unexpected status`, or slow startup | A spec registered by URL is downloaded on every run. Download it once (`curl -o spec.json <url>`) and re-add the local file with `--force`. |
+| `loading <api> ...: unexpected status` | The spec couldn't be downloaded and forge has no cached copy. Check the spec URL with the user. |
+| A command the API should have is missing | The cached spec may be out of date: `forge refresh <name>` |

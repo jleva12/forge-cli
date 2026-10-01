@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,6 +25,8 @@ type LoadOptions struct {
 	// real-world specs are slightly invalid but still perfectly usable.
 	Validate  bool
 	Normalize NormalizeOptions
+	// Cache, if set, keeps specs downloaded from URLs on disk between runs.
+	Cache *Cache
 }
 
 // Load reads a spec from a file path or an http(s) URL. JSON and YAML are
@@ -36,12 +37,13 @@ func Load(ctx context.Context, location string, opts LoadOptions) (*API, error) 
 		base *url.URL
 		err  error
 	)
+	f := newFetcher(ctx, opts)
 	if isURL(location) {
 		base, err = url.Parse(location)
 		if err != nil {
 			return nil, err
 		}
-		data, err = fetch(ctx, opts.HTTPClient, location)
+		data, err = f.get(location)
 	} else {
 		var abs string
 		if abs, err = filepath.Abs(location); err == nil {
@@ -52,10 +54,11 @@ func Load(ctx context.Context, location string, opts LoadOptions) (*API, error) 
 	if err != nil {
 		return nil, fmt.Errorf("reading spec %s: %w", location, err)
 	}
-	api, err := LoadData(ctx, data, base, opts)
+	api, err := loadData(ctx, data, base, opts, f)
 	if err != nil {
 		return nil, err
 	}
+	f.save()
 	api.Source = location
 	return api, nil
 }
@@ -63,7 +66,18 @@ func Load(ctx context.Context, location string, opts LoadOptions) (*API, error) 
 // LoadData parses spec bytes (e.g. from go:embed). base, if set, is used to
 // resolve relative $refs and relative server URLs.
 func LoadData(ctx context.Context, data []byte, base *url.URL, opts LoadOptions) (*API, error) {
-	doc, err := Parse(data, base)
+	f := newFetcher(ctx, opts)
+	api, err := loadData(ctx, data, base, opts, f)
+	if err != nil {
+		return nil, err
+	}
+	f.save()
+	return api, nil
+}
+
+// loadData is LoadData, reading external $refs with f.
+func loadData(ctx context.Context, data []byte, base *url.URL, opts LoadOptions, f *fetcher) (*API, error) {
+	doc, err := parse(data, base, openapi3.URIMapCache(f.readFromURI))
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +106,11 @@ func LoadData(ctx context.Context, data []byte, base *url.URL, opts LoadOptions)
 // OpenAPI 3, and the basePath for Swagger 2.0 without a host. Both are
 // relative to wherever the spec was loaded from, and LoadData resolves them.
 func Parse(data []byte, base *url.URL) (*openapi3.T, error) {
+	return parse(data, base, nil)
+}
+
+// parse is Parse with a custom reader for external $refs (nil for the default).
+func parse(data []byte, base *url.URL, readFromURI openapi3.ReadFromURIFunc) (*openapi3.T, error) {
 	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	// JSON is parsed as is: the YAML parser rejects some valid JSON, such as
 	// escaped emoji ("👍").
@@ -130,6 +149,7 @@ func Parse(data []byte, base *url.URL) (*openapi3.T, error) {
 
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
+	loader.ReadFromURIFunc = readFromURI
 	var (
 		doc *openapi3.T
 		err error
@@ -150,24 +170,4 @@ func Parse(data []byte, base *url.URL) (*openapi3.T, error) {
 
 func isURL(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
-}
-
-func fetch(ctx context.Context, client *http.Client, location string) ([]byte, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, location, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json, application/yaml;q=0.9, */*;q=0.5")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("unexpected status %s", resp.Status)
-	}
-	return io.ReadAll(resp.Body)
 }

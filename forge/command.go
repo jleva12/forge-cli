@@ -516,6 +516,10 @@ func (a *App) resolveBaseURL(fs *pflag.FlagSet) (string, error) {
 		return a.baseURL, nil
 	}
 	for _, s := range a.api.Servers {
+		if len(s.Missing) > 0 {
+			return "", fmt.Errorf("the spec's server URL %s needs a value for {%s}: pass --server or set %s_SERVER",
+				s.URL, strings.Join(s.Missing, "}, {"), a.envPrefix)
+		}
 		if strings.HasPrefix(s.URL, "http://") || strings.HasPrefix(s.URL, "https://") {
 			return s.URL, nil
 		}
