@@ -7,7 +7,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 func TestSchemaInlinesRefsAndStopsRecursion(t *testing.T) {

@@ -21,10 +21,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"forge-cli/auth"
-	"forge-cli/forge"
-	"forge-cli/spec"
-	"forge-cli/style"
+	"github.com/jleva12/forge-cli/auth"
+	"github.com/jleva12/forge-cli/forge"
+	"github.com/jleva12/forge-cli/spec"
+	"github.com/jleva12/forge-cli/style"
 )
 
 const setupHelp = `No API is active yet. Register one or more APIs by name, then pick one:

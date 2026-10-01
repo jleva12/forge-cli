@@ -13,9 +13,9 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"forge-cli/filter"
-	"forge-cli/naming"
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/filter"
+	"github.com/jleva12/forge-cli/naming"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 // Transform mutates an operation in place.

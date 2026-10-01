@@ -14,7 +14,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 // BodyProperty is the input property carrying a complete request body. It's

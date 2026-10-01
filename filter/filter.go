@@ -16,8 +16,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	
-	"forge-cli/spec"
+
+	"github.com/jleva12/forge-cli/spec"
 )
 
 // Matcher reports whether an operation matches.

@@ -3,7 +3,7 @@ package transform
 import (
 	"testing"
 
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 func TestTrimGroupFromName(t *testing.T) {

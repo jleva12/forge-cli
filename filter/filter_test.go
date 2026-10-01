@@ -3,7 +3,7 @@ package filter
 import (
 	"testing"
 
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 func TestGlob(t *testing.T) {

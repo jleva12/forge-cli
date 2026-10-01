@@ -3,7 +3,7 @@ package catalog
 import (
 	"strings"
 
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 // SynopsisOptions controls Synopsis output.

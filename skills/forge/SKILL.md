@@ -1,7 +1,7 @@
 ---
 name: forge
 description: Call HTTP APIs from the shell with the forge CLI, which turns OpenAPI specs into commands. Covers registering an API from a spec file or URL, switching between registered APIs, checking and setting up authentication, and finding and running the right command. Use when a task involves forge, calling a REST API that is (or should be) registered in forge, or adding an OpenAPI spec as a CLI.
-compatibility: Requires the forge binary on PATH (go install ./cmd/forge in the forge-cli repository).
+compatibility: Requires the forge binary on PATH (go install github.com/jleva12/forge-cli/cmd/forge@latest).
 ---
 
 # forge

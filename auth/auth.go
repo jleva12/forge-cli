@@ -14,8 +14,8 @@ import (
 	"os"
 	"strings"
 
-	"forge-cli/naming"
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/naming"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 // ErrNoCredentials means a provider has nothing to apply. The registry then

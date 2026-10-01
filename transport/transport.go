@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"forge-cli/style"
+	"github.com/jleva12/forge-cli/style"
 )
 
 // Middleware wraps a RoundTripper.

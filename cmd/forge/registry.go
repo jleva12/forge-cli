@@ -13,9 +13,9 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"forge-cli/filter"
-	"forge-cli/forge"
-	"forge-cli/naming"
+	"github.com/jleva12/forge-cli/filter"
+	"github.com/jleva12/forge-cli/forge"
+	"github.com/jleva12/forge-cli/naming"
 )
 
 // Registry is the set of named APIs forge knows about, stored as TOML so it

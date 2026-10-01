@@ -1,4 +1,4 @@
-module forge-cli
+module github.com/jleva12/forge-cli
 
 go 1.27
 

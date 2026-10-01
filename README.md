@@ -38,14 +38,20 @@ forge pet get-pet-by-id --pet-id 10 -o yaml
 Requires Go 1.27 or newer.
 
 ```sh
-git clone <this repo> forge-cli && cd forge-cli
+go install github.com/jleva12/forge-cli/cmd/forge@latest
+```
+
+Or build it from a clone, which also gives you the [agent skill](#agent-skill):
+
+```sh
+git clone https://github.com/jleva12/forge-cli.git && cd forge-cli
 go install ./cmd/forge
 ```
 
 If your Go is older, for example Homebrew's, `go install` stops with `go.mod requires go >= 1.27 (running go 1.23.4; GOTOOLCHAIN=local)`. Let Go download the version it needs:
 
 ```sh
-GOTOOLCHAIN=auto go install ./cmd/forge
+GOTOOLCHAIN=auto go install github.com/jleva12/forge-cli/cmd/forge@latest
 ```
 
 This puts a `forge` binary in `$(go env GOPATH)/bin` (usually `~/go/bin`). Make sure that directory is on your `PATH`:
@@ -63,7 +69,7 @@ forge completion install
 
 This detects your shell (bash, zsh or fish) from `$SHELL` and sets up completion in its startup file: `~/.zshrc`, `~/.bash_profile` on macOS (`~/.bashrc` elsewhere), or `~/.config/fish/completions/forge.fish`. It's safe to re-run, since it removes any earlier setup first, including `source <(forge completion zsh)` lines added by hand. Pass a shell to pick one (`forge completion install zsh`); `forge completion uninstall` removes it again. Bash also needs the `bash-completion` package (`brew install bash-completion@2` on macOS).
 
-**Updating:** pull the latest code and run `go install ./cmd/forge` again. **Uninstalling:** run `forge completion uninstall`, then `rm ~/go/bin/forge`. To also delete your settings, remove `~/.config/forge`, delete any `forge-cli` entries in Keychain Access, and remove the agent skill if you installed it (`rm -r ~/.claude/skills/forge`).
+**Updating:** run the same `go install` command again (in a clone, pull first). **Uninstalling:** run `forge completion uninstall`, then `rm ~/go/bin/forge`. To also delete your settings, remove `~/.config/forge`, delete any `forge-cli` entries in Keychain Access, and remove the agent skill if you installed it (`rm -r ~/.claude/skills/forge`).
 
 ---
 
@@ -542,7 +548,7 @@ For large APIs, response schemas are included only when 10 or fewer tools are se
 
 ### Agent skill
 
-[`skills/forge`](skills/forge/SKILL.md) is an [Agent Skill](https://agentskills.io) that teaches an agent to use forge. It covers registering APIs, switching between them, checking logins (and leaving the login itself to you), and finding and running commands. Copy the folder to wherever your agent loads skills from, for example for Claude Code:
+[`skills/forge`](skills/forge/SKILL.md) is an [Agent Skill](https://agentskills.io) that teaches an agent to use forge. It covers registering APIs, switching between them, checking logins (and leaving the login itself to you), and finding and running commands. From a clone of this repository, copy the folder to wherever your agent loads skills from, for example for Claude Code:
 
 ```sh
 mkdir -p ~/.claude/skills && cp -r skills/forge ~/.claude/skills/    # every project
@@ -653,10 +659,10 @@ package main
 import (
 	_ "embed"
 
-	"forge-cli/auth"
-	"forge-cli/filter"
-	"forge-cli/forge"
-	"forge-cli/transform"
+	"github.com/jleva12/forge-cli/auth"
+	"github.com/jleva12/forge-cli/filter"
+	"github.com/jleva12/forge-cli/forge"
+	"github.com/jleva12/forge-cli/transform"
 )
 
 //go:embed openapi.yaml

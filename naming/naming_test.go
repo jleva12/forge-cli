@@ -3,7 +3,7 @@ package naming
 import (
 	"testing"
 
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 func TestKebab(t *testing.T) {

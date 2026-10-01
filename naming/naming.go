@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	"forge-cli/spec"
+	"github.com/jleva12/forge-cli/spec"
 )
 
 // Namer derives CLI names from operations. Implement it to change naming

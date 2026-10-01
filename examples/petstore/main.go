@@ -10,11 +10,11 @@ import (
 	_ "embed"
 	"time"
 
-	"forge-cli/auth"
-	"forge-cli/filter"
-	"forge-cli/forge"
-	"forge-cli/transform"
-	"forge-cli/transport"
+	"github.com/jleva12/forge-cli/auth"
+	"github.com/jleva12/forge-cli/filter"
+	"github.com/jleva12/forge-cli/forge"
+	"github.com/jleva12/forge-cli/transform"
+	"github.com/jleva12/forge-cli/transport"
 )
 
 //go:embed petstore.yaml

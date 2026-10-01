@@ -11,7 +11,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"forge-cli/style"
+	"github.com/jleva12/forge-cli/style"
 )
 
 // Response is a fully read HTTP response.

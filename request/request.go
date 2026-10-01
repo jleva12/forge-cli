@@ -15,8 +15,8 @@ import (
 	"sort"
 	"strings"
 
-	"forge-cli/spec"
-	"forge-cli/transport"
+	"github.com/jleva12/forge-cli/spec"
+	"github.com/jleva12/forge-cli/transport"
 )
 
 // Input holds the values for one invocation.
