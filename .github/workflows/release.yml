@@ -1,9 +1,10 @@
 # Every push to main (including a merged pull request) runs the tests and, if
 # they pass, tags the next version and publishes a GitHub release for it.
 #
-# The next version bumps the patch number (v0.1.0 -> v0.1.1). Put "#minor" or
-# "#major" in a commit message (or a squash-merged PR's title) to bump those
-# instead. Put "[skip ci]" in the pushed commit's message to skip the release.
+# The next version bumps the patch number (v0.1.0 -> v0.1.1). Put #minor or
+# #major, as a separate word, in a commit message (or a squash-merged PR's
+# title) to bump those instead. Put "[skip ci]" in the pushed commit's message
+# to skip the release.
 name: Release
 
 on:
@@ -53,9 +54,9 @@ jobs:
           log=$(git log --format=%B "$last..HEAD")
           IFS=. read -r major minor patch <<< "${last#v}"
           patch=${patch%%[-+]*}
-          if grep -q '#major' <<< "$log"; then
+          if grep -Eq '(^|[[:space:]])#major([[:space:]]|$)' <<< "$log"; then
             major=$((major + 1)); minor=0; patch=0
-          elif grep -q '#minor' <<< "$log"; then
+          elif grep -Eq '(^|[[:space:]])#minor([[:space:]]|$)' <<< "$log"; then
             minor=$((minor + 1)); patch=0
           else
             patch=$((patch + 1))
