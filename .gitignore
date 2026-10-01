@@ -4,6 +4,5 @@
 # macOS
 .DS_Store
 
-# Binaries built with go build in the repo root
-/forge
+# Binary from "go build ./examples/petstore" in the repo root
 /petstore
